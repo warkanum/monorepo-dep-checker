@@ -7,6 +7,9 @@
     "bin": {
         "dep-check": "./bin/dep-check.js"
     },
+    "publishConfig": {
+        "access": "public"
+    },
     "files": [
         "dist",
         "bin",
