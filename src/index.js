@@ -1,6 +1,5 @@
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import chalk from 'chalk';
 import semver from 'semver';
 import yargs from 'yargs';
@@ -132,6 +131,7 @@ class DependencyChecker {
 
         if (missing.length > 0 || extraDeps.length > 0) {
           missingDeps.set(packageName, {
+            // eslint-disable-next-line no-undef
             path: path.relative(process.cwd(), filePath),
             missing,
             extraDeps,
@@ -277,6 +277,7 @@ class DependencyChecker {
             });
             return {
               package: pkg,
+              // eslint-disable-next-line no-undef
               path: path.relative(process.cwd(), filePath),
             };
           }),
@@ -410,6 +411,7 @@ class DependencyChecker {
                   });
                   return {
                     package: pkg,
+                    // eslint-disable-next-line no-undef
                     path: path.relative(process.cwd(), filePath),
                   };
                 }),
@@ -571,6 +573,7 @@ class DependencyChecker {
 
 // CLI implementation
 const run = async () => {
+  // eslint-disable-next-line no-undef
   const argv = yargs(hideBin(process.argv))
     .usage('Usage: $0 [options]')
     .option('app', {
@@ -621,17 +624,21 @@ const run = async () => {
     .example('$0 --check-missing', 'Show missing dependencies')
     .example('$0 --update --dry-run', 'Show what would be updated').argv;
 
+  // eslint-disable-next-line no-undef
   const appPackageJson = path.resolve(process.cwd(), argv.app);
+  // eslint-disable-next-line no-undef
   const packagesDir = path.resolve(process.cwd(), argv.packages);
 
   // Validate paths
   if (!fs.existsSync(appPackageJson)) {
     console.error(chalk.red(`Error: Main package.json not found at ${appPackageJson}`));
+    // eslint-disable-next-line no-undef
     process.exit(1);
   }
 
   if (!fs.existsSync(packagesDir)) {
     console.error(chalk.red(`Error: Packages directory not found at ${packagesDir}`));
+    // eslint-disable-next-line no-undef
     process.exit(1);
   }
 
@@ -648,7 +655,7 @@ const run = async () => {
 // Export both the class and run function
 export { DependencyChecker, run as default };
 
+// eslint-disable-next-line no-undef
 if (process.argv[1] === import.meta.url.slice(7)) {
-  console.log('Running');
   run();
 }
