@@ -474,67 +474,77 @@ class DependencyChecker {
   async updateDependencies(dryRun = false) {
     console.log(chalk.bold('\nUpdating dependencies...\n'));
 
+    // Read the main app's package.json
+    const appPackageJson = JSON.parse(fs.readFileSync(this.appPackageJsonPath, 'utf8'));
+    const appDependencies = {
+      ...appPackageJson.dependencies,
+      ...appPackageJson.devDependencies,
+      ...appPackageJson.peerDependencies
+    };
+
     const updates = [];
-    this.dependencyMap.forEach((depInfo, dep) => {
-      const allVersions = Array.from(depInfo.versions.keys()).filter(
-        (v) => !v.startsWith('workspace:')
-      ); // Skip workspace dependencies
 
-      if (allVersions.length === 0) return; // Skip if only workspace versions exist
+    // Process each package.json except the main app
+    this.packageJsonFiles
+      .filter(filePath => filePath !== this.appPackageJsonPath)
+      .forEach(filePath => {
+        const packageJson = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        let hasUpdates = false;
 
-      const cleanVersions = allVersions.map((v) => this.getSemverVersion(v)).filter(Boolean);
+        // Helper function to update dependencies of a specific type
+        const updateDependencySection = (section) => {
+          if (!packageJson[section]) return;
 
-      if (cleanVersions.length === 0) return; // Skip if no valid versions
-
-      const highestVersion = semver.maxSatisfying(cleanVersions, '*');
-
-      if (highestVersion) {
-        this.packageJsonFiles.forEach((filePath) => {
-          const packageJson = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-          let updated = false;
-
-          // Don't update workspace dependencies
-          if (
-            packageJson.dependencies?.[dep] &&
-            !packageJson.dependencies[dep].startsWith('workspace:')
-          ) {
-            if (!dryRun) {
-              packageJson.dependencies[dep] = `^${highestVersion}`;
+          Object.entries(packageJson[section]).forEach(([dep, version]) => {
+            // Skip workspace dependencies
+            if (version.startsWith('workspace:')) return;
+            
+            // If the dependency exists in the main app, sync the version
+            if (appDependencies[dep]) {
+              const appVersion = appDependencies[dep];
+              if (version !== appVersion) {
+                if (!dryRun) {
+                  packageJson[section][dep] = appVersion;
+                }
+                updates.push({
+                  package: packageJson.name,
+                  dependency: dep,
+                  from: version,
+                  to: appVersion,
+                  type: section
+                });
+                hasUpdates = true;
+              }
             }
-            updated = true;
-          }
+          });
+        };
 
-          if (
-            packageJson.peerDependencies?.[dep] &&
-            !packageJson.peerDependencies[dep].startsWith('workspace:')
-          ) {
-            if (!dryRun) {
-              packageJson.peerDependencies[dep] = `^${highestVersion}`;
-            }
-            updated = true;
-          }
+        // Update all dependency sections
+        updateDependencySection('dependencies');
+        updateDependencySection('devDependencies');
+        updateDependencySection('peerDependencies');
 
-          if (updated) {
-            if (!dryRun) {
-              fs.writeFileSync(filePath, JSON.stringify(packageJson, null, 2));
-            }
-            updates.push({
-              package: packageJson.name,
-              dependency: dep,
-              version: highestVersion,
-            });
-          }
-        });
-      }
-    });
+        // Write updated package.json if there were changes
+        if (hasUpdates && !dryRun) {
+          fs.writeFileSync(filePath, JSON.stringify(packageJson, null, 2) + '\n');
+        }
+      });
 
-    updates.forEach(({ package: pkgName, dependency, version }) => {
-      console.log(
-        chalk.green(
-          `${dryRun ? '[DRY RUN] Would update' : 'Updated'} ${dependency} to ^${version} in ${pkgName}`
-        )
-      );
-    });
+    // Display updates
+    if (updates.length === 0) {
+      console.log(chalk.green('No updates needed - all versions match the main app'));
+    } else {
+      updates.forEach(({ package: pkgName, dependency, from, to, type }) => {
+        console.log(
+          chalk.green(
+            `${dryRun ? '[DRY RUN] Would update' : 'Updated'} ${dependency} in ${pkgName} (${type})\n` +
+            `  ${chalk.red(from)} → ${chalk.green(to)}`
+          )
+        );
+      });
+    }
+
+    return updates;
   }
 
   async run({
