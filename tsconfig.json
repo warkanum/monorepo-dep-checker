@@ -1,0 +1,20 @@
+{
+  "include": ["*.d.ts", "./src"],
+  "exclude": ["public", "dist", "./dist", "node_modules", "vite.config.js"],
+  "compilerOptions": {
+    "types": ["node"],
+    "target": "ES6",
+    "lib": ["DOM", "ESNext"],
+    "module": "ESNext",
+    "moduleResolution": "Node",
+    "jsx": "react-jsx",
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "strict": true,
+    "paths": {
+      "@/*": ["./*"]
+    }
+  }
+}

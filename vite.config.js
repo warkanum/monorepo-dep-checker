@@ -4,10 +4,12 @@ import { resolve } from 'path';
 export default defineConfig({
   build: {
     lib: {
-      entry: resolve(__dirname, 'src/index.js'),
+      // eslint-disable-next-line no-undef
+      entry: resolve(__dirname, 'src/index.ts'),
       formats: ['es'],
       fileName: 'index'
     },
+    ssr:true,
     rollupOptions: {
       external: [
         'fs',
@@ -17,10 +19,12 @@ export default defineConfig({
         'semver',
         'yargs',
         'yargs/helpers'
-      ]
+      ],
     },
     target: 'node14',
+    
     outDir: 'dist',
+    
     emptyOutDir: true,
     sourcemap: true
   }

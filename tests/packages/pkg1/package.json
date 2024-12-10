@@ -1,0 +1,11 @@
+{
+  "name": "pkg1",
+  "version": "1.0.0",
+  "dependencies": {
+    "react": "^17.0.2",
+    "lodash": "^4.17.21"
+  },
+  "peerDependencies": {
+    "typescript": "^4.9.0"
+  }
+}
