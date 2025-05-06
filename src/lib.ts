@@ -173,11 +173,12 @@ class DependencyChecker {
       if (semver.valid(workspaceVersion)) return workspaceVersion;
       return null;
     }
-
+  
     if (version === "*" || version === "latest") return null;
-
-    const cleanVersion = version.replace(/^[~^]/, "");
-
+  
+    // Handle more version range operators: ^, ~, >=, >
+    const cleanVersion = version.replace(/^[~^>=]+\s*/, "");
+  
     try {
       if (semver.valid(cleanVersion)) return cleanVersion;
       return null;
@@ -590,14 +591,23 @@ class DependencyChecker {
             if (appDependencies[dep]) {
               const appVersion = appDependencies[dep];
               if (version !== appVersion) {
+                // Extract the version prefix (>=, >, ^, ~) if any
+                const versionPrefix = version.match(/^([~^>=]+\s*)/)?.[0] || '';
+                const newVersion = appVersion.startsWith(versionPrefix) ? 
+                  appVersion : 
+                  // If the app version doesn't have the same prefix, preserve the original prefix
+                  appVersion.match(/^[~^>=]+\s*/) ? 
+                    appVersion : 
+                    `${versionPrefix}${appVersion.replace(/^[~^>=]+\s*/, '')}`;
+                    
                 if (!dryRun) {
-                  packageJson[section]![dep] = appVersion;
+                  packageJson[section]![dep] = newVersion;
                 }
                 updates.push({
                   package: packageJson.name,
                   dependency: dep,
                   from: version,
-                  to: appVersion,
+                  to: newVersion,
                   type: section,
                 });
                 hasUpdates = true;
