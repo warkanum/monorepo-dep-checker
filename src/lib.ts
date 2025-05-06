@@ -176,8 +176,8 @@ class DependencyChecker {
   
     if (version === "*" || version === "latest") return null;
   
-    // Handle more version range operators: ^, ~, >=, >
-    const cleanVersion = version.replace(/^[~^>=]+\s*/, "");
+    // Strip ALL range operators (^, ~, >=, >, <=, <) and any spaces after them
+    const cleanVersion = version.replace(/^[~^<>=]+\s*/g, "");
   
     try {
       if (semver.valid(cleanVersion)) return cleanVersion;
@@ -590,19 +590,21 @@ class DependencyChecker {
 
             if (appDependencies[dep]) {
               const appVersion = appDependencies[dep];
-              if (version !== appVersion) {
-                // Extract the version prefix (>=, >, ^, ~) if any
-                const versionPrefix = version.match(/^([~^>=]+\s*)/)?.[0] || '';
-                const newVersion = appVersion.startsWith(versionPrefix) ? 
-                  appVersion : 
-                  // If the app version doesn't have the same prefix, preserve the original prefix
-                  appVersion.match(/^[~^>=]+\s*/) ? 
-                    appVersion : 
-                    `${versionPrefix}${appVersion.replace(/^[~^>=]+\s*/, '')}`;
-                    
+              // Extract just the version numbers for comparison
+              const cleanCurrentVersion = version.replace(/^[~^<>=]+\s*/g, "");
+              const cleanAppVersion = appVersion.replace(/^[~^<>=]+\s*/g, "");
+
+              if (cleanCurrentVersion !== cleanAppVersion) {
+                // Extract the version prefix (operators and spaces)
+                const versionPrefix = version.match(/^[~^<>=]+\s*/)?.[0] || '';
+                
+                // Create new version string with original prefix but updated version number
+                const newVersion = versionPrefix + cleanAppVersion;
+                
                 if (!dryRun) {
                   packageJson[section]![dep] = newVersion;
                 }
+                
                 updates.push({
                   package: packageJson.name,
                   dependency: dep,
@@ -610,6 +612,7 @@ class DependencyChecker {
                   to: newVersion,
                   type: section,
                 });
+                
                 hasUpdates = true;
               }
             }
