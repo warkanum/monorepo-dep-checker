@@ -1,5 +1,11 @@
 # @warkypublic/monorepo-dep-checker
 
+## 1.0.4
+
+### Patch Changes
+
+- Rather Ignore version oprators and keep package operators
+
 ## 1.0.3
 
 ### Patch Changes
