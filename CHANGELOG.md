@@ -1,5 +1,11 @@
 # @warkypublic/monorepo-dep-checker
 
+## 1.0.5
+
+### Patch Changes
+
+- Added Strict Mode
+
 ## 1.0.4
 
 ### Patch Changes
