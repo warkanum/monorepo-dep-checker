@@ -52,9 +52,16 @@ const cli = async () => {
       default: 'text',
       type:'string'
     })
+    .option('strict', {
+      alias: 's',
+      describe: 'Strict mode: only update packages with version ranges (~, ^, >=) if they are incompatible',
+      type: 'boolean',
+      default: false,
+    })
     .example('$0 --check-versions', 'Show only version differences')
     .example('$0 --check-missing', 'Show missing dependencies')
     .example('$0 --update --dry-run', 'Show what would be updated')
+    .example('$0 --update --strict', 'Update only incompatible versions within ranges')
     .example('$0 --packages ./packages,./other-packages', 'Check multiple package directories')
     .example('$0 --packages ./pkg1/package.json,./pkg2/package.json', 'Check specific package.json files')
     .example('$0 --packages ./packages,./other/package.json', 'Mix of directories and files')
@@ -135,6 +142,7 @@ const cli = async () => {
       format: argv.format as any,
       checkVersions: argv.checkVersions,
       checkMissing: argv.checkMissing,
+      strict: argv.strict,
     });
   } catch (error:any) {
     console.error(chalk.red('Error during execution:'));

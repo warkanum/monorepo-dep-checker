@@ -16,6 +16,7 @@ interface RunOptions {
   format?: "text" | "json";
   checkVersions?: boolean;
   checkMissing?: boolean;
+  strict?: boolean;
 }
 
 interface VersionInfo {
@@ -75,6 +76,7 @@ class DependencyChecker {
   private packageJsonFiles: string[];
   private dependencyMap: Map<string, DependencyInfo>;
   private workspacePackages: Set<string>;
+  private strictMode: boolean;
 
   constructor(appPackageJsonPath: string, packagesInput: string) {
     this.appPackageJsonPath = appPackageJsonPath;
@@ -82,6 +84,7 @@ class DependencyChecker {
     this.packageJsonFiles = [];
     this.dependencyMap = new Map();
     this.workspacePackages = new Set();
+    this.strictMode = false;
   }
 
   private findWorkspacePackages(): void {
@@ -145,6 +148,21 @@ class DependencyChecker {
 
   private isWorkspacePackage(packageName: string): boolean {
     return this.workspacePackages.has(packageName);
+  }
+
+  private hasVersionRange(version: string): boolean {
+    return /^[~^<>=]+/.test(version);
+  }
+
+  private isVersionCompatible(rangeVersion: string, targetVersion: string): boolean {
+    try {
+      const cleanTargetVersion = this.getSemverVersion(targetVersion);
+      if (!cleanTargetVersion) return false;
+      
+      return semver.satisfies(cleanTargetVersion, rangeVersion);
+    } catch {
+      return false;
+    }
   }
 
   private shouldIncludeDependency(
@@ -590,30 +608,52 @@ class DependencyChecker {
 
             if (appDependencies[dep]) {
               const appVersion = appDependencies[dep];
-              // Extract just the version numbers for comparison
-              const cleanCurrentVersion = version.replace(/^[~^<>=]+\s*/g, "");
-              const cleanAppVersion = appVersion.replace(/^[~^<>=]+\s*/g, "");
-
-              if (cleanCurrentVersion !== cleanAppVersion) {
-                // Extract the version prefix (operators and spaces)
-                const versionPrefix = version.match(/^[~^<>=]+\s*/)?.[0] || '';
-                
-                // Create new version string with original prefix but updated version number
-                const newVersion = versionPrefix + cleanAppVersion;
-                
-                if (!dryRun) {
-                  packageJson[section]![dep] = newVersion;
+              
+              // In strict mode, check if versions are compatible within range constraints
+              if (this.strictMode && this.hasVersionRange(version)) {
+                if (!this.isVersionCompatible(version, appVersion)) {
+                  // Only update if the app version doesn't satisfy the range
+                  const cleanAppVersion = appVersion.replace(/^[~^<>=]+\s*/g, "");
+                  const versionPrefix = version.match(/^[~^<>=]+\s*/)?.[0] || '';
+                  const newVersion = versionPrefix + cleanAppVersion;
+                  
+                  if (!dryRun) {
+                    packageJson[section]![dep] = newVersion;
+                  }
+                  
+                  updates.push({
+                    package: packageJson.name,
+                    dependency: dep,
+                    from: version,
+                    to: newVersion,
+                    type: section,
+                  });
+                  
+                  hasUpdates = true;
                 }
-                
-                updates.push({
-                  package: packageJson.name,
-                  dependency: dep,
-                  from: version,
-                  to: newVersion,
-                  type: section,
-                });
-                
-                hasUpdates = true;
+              } else {
+                // Original behavior for non-strict mode
+                const cleanCurrentVersion = version.replace(/^[~^<>=]+\s*/g, "");
+                const cleanAppVersion = appVersion.replace(/^[~^<>=]+\s*/g, "");
+
+                if (cleanCurrentVersion !== cleanAppVersion) {
+                  const versionPrefix = version.match(/^[~^<>=]+\s*/)?.[0] || '';
+                  const newVersion = versionPrefix + cleanAppVersion;
+                  
+                  if (!dryRun) {
+                    packageJson[section]![dep] = newVersion;
+                  }
+                  
+                  updates.push({
+                    package: packageJson.name,
+                    dependency: dep,
+                    from: version,
+                    to: newVersion,
+                    type: section,
+                  });
+                  
+                  hasUpdates = true;
+                }
               }
             }
           });
@@ -768,7 +808,10 @@ class DependencyChecker {
       format = "text",
       checkVersions = false,
       checkMissing = false,
+      strict = false,
     } = options;
+
+    this.strictMode = strict;
 
     if (checkMissing) {
       this.findPackageJsonFiles();
