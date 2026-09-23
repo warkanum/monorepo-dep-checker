@@ -188,7 +188,8 @@ class DependencyChecker {
     if (version.startsWith("workspace:")) {
       const workspaceVersion = version.replace("workspace:", "");
       if (workspaceVersion === "*") return null;
-      if (semver.valid(workspaceVersion)) return workspaceVersion;
+      const cleanWorkspaceVersion = workspaceVersion.replace(/^[~^<>=]+\s*/g, "");
+      if (semver.valid(cleanWorkspaceVersion)) return cleanWorkspaceVersion;
       return null;
     }
   
@@ -241,9 +242,8 @@ class DependencyChecker {
 
         Object.entries(packageDeps).forEach(([dep, version]) => {
           if (
-            (!appDeps[dep] &&
-              this.shouldIncludeDependency(dep, version, packageJson)) ||
-            (packageJson.peerDependencies?.[dep] && !appDeps[dep])
+            !appDeps[dep] &&
+            this.shouldIncludeDependency(dep, version, packageJson)
           ) {
             missing.push({ name: dep, version });
             uniqueMissingDeps.add(dep);
@@ -608,19 +608,22 @@ class DependencyChecker {
 
             if (appDependencies[dep]) {
               const appVersion = appDependencies[dep];
-              
-              // In strict mode, check if versions are compatible within range constraints
-              if (this.strictMode && this.hasVersionRange(version)) {
-                if (!this.isVersionCompatible(version, appVersion)) {
-                  // Only update if the app version doesn't satisfy the range
+
+              if (this.strictMode) {
+                // Strict mode: only touch dependencies with a version range,
+                // and only when the app version falls outside that range.
+                if (
+                  this.hasVersionRange(version) &&
+                  !this.isVersionCompatible(version, appVersion)
+                ) {
                   const cleanAppVersion = appVersion.replace(/^[~^<>=]+\s*/g, "");
                   const versionPrefix = version.match(/^[~^<>=]+\s*/)?.[0] || '';
                   const newVersion = versionPrefix + cleanAppVersion;
-                  
+
                   if (!dryRun) {
                     packageJson[section]![dep] = newVersion;
                   }
-                  
+
                   updates.push({
                     package: packageJson.name,
                     dependency: dep,
@@ -628,22 +631,22 @@ class DependencyChecker {
                     to: newVersion,
                     type: section,
                   });
-                  
+
                   hasUpdates = true;
                 }
               } else {
-                // Original behavior for non-strict mode
+                // Non-strict mode: always align to the app's version.
                 const cleanCurrentVersion = version.replace(/^[~^<>=]+\s*/g, "");
                 const cleanAppVersion = appVersion.replace(/^[~^<>=]+\s*/g, "");
 
                 if (cleanCurrentVersion !== cleanAppVersion) {
                   const versionPrefix = version.match(/^[~^<>=]+\s*/)?.[0] || '';
                   const newVersion = versionPrefix + cleanAppVersion;
-                  
+
                   if (!dryRun) {
                     packageJson[section]![dep] = newVersion;
                   }
-                  
+
                   updates.push({
                     package: packageJson.name,
                     dependency: dep,
@@ -651,7 +654,7 @@ class DependencyChecker {
                     to: newVersion,
                     type: section,
                   });
-                  
+
                   hasUpdates = true;
                 }
               }
@@ -746,59 +749,7 @@ class DependencyChecker {
       return;
     }
 
-    if (format === "text") {
-      this.displayVersionDifferences();
-      return;
-    }
-
-    const output = {
-      summary: {
-        conflicts: Array.from(this.dependencyMap.entries())
-          .filter(([, depInfo]) => depInfo.versions.size > 1)
-          .map(([dep, depInfo]) => ({
-            name: dep,
-            versions: Array.from(depInfo.versions.entries()).map(
-              ([version, info]) => ({
-                version,
-                packages: Array.from(info.packages),
-                paths: Array.from(info.packages).map((pkg) => {
-                  const filePath = this.packageJsonFiles.find((file) => {
-                    const json = JSON.parse(
-                      fs.readFileSync(file, "utf8")
-                    ) as PackageJson;
-                    return json.name === pkg;
-                  });
-                  return {
-                    package: pkg,
-                    path: path.relative(process.cwd(), filePath || ""),
-                  };
-                }),
-                usages: Array.from(info.usages),
-              })
-            ),
-          })),
-      },
-      fullAnalysis: Object.fromEntries(
-        Array.from(this.dependencyMap.entries()).map(([dep, depInfo]) => [
-          dep,
-          {
-            versions: Object.fromEntries(
-              Array.from(depInfo.versions.entries()).map(([version, info]) => [
-                version,
-                {
-                  packages: Array.from(info.packages),
-                  usages: Array.from(info.usages),
-                },
-              ])
-            ),
-            usedAsNormal: depInfo.usedAsNormal,
-            usedAsPeer: depInfo.usedAsPeer,
-          },
-        ])
-      ),
-    };
-
-    console.log(JSON.stringify(output, null, 2));
+    this.displayVersionDifferences();
   }
 
   public async run(options: RunOptions = {}): Promise<void> {

@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { pathToFileURL } from 'url';
 import chalk from 'chalk';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
@@ -157,7 +158,7 @@ const cli = async () => {
 // Export both the CLI function and run it if this is the main module
 export { cli as default };
 
-if (process.argv[1] === import.meta.url.slice(7)) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   cli().catch(error => {
     console.error(chalk.red('Unexpected error:'));
     console.error(error);
