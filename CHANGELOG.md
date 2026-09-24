@@ -1,5 +1,11 @@
 # @warkypublic/monorepo-dep-checker
 
+## 1.0.6
+
+### Patch Changes
+
+- Added --fail-on-diff and --fail-on-missing CI gating flags, with run() now returning a result summary instead of void.
+
 ## 1.0.5
 
 ### Patch Changes

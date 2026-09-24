@@ -53,6 +53,16 @@ const cli = async () => {
       default: 'text',
       type:'string'
     })
+    .option('fail-on-diff', {
+      describe: 'Exit with code 1 if any dependency resolves to more than one version (CI gating)',
+      type: 'boolean',
+      default: false,
+    })
+    .option('fail-on-missing', {
+      describe: 'Exit with code 1 if any package depends on something the main app does not (CI gating)',
+      type: 'boolean',
+      default: false,
+    })
     .option('strict', {
       alias: 's',
       describe: 'Strict mode: only update packages with version ranges (~, ^, >=) if they are incompatible',
@@ -66,6 +76,8 @@ const cli = async () => {
     .example('$0 --packages ./packages,./other-packages', 'Check multiple package directories')
     .example('$0 --packages ./pkg1/package.json,./pkg2/package.json', 'Check specific package.json files')
     .example('$0 --packages ./packages,./other/package.json', 'Mix of directories and files')
+    .example('$0 --check-versions --fail-on-diff', 'Fail CI on version conflicts')
+    .example('$0 --check-missing --fail-on-missing', 'Fail CI on unsynchronised dependencies')
     .epilogue('For more information, visit: https://github.com/warkanum/monorepo-dep-checker')
     .wrap(Math.min(120, process.stdout.columns))
     .version()
@@ -134,17 +146,43 @@ const cli = async () => {
     console.error(chalk.yellow('Warning: --dry-run has no effect without --update'));
   }
 
+  // The gates report on the tree as found; --update rewrites it mid-run, which
+  // would leave the exit code describing a state that no longer exists.
+  if (argv.update && (argv.failOnDiff || argv.failOnMissing)) {
+    console.error(
+      chalk.red('Error: --fail-on-diff and --fail-on-missing cannot be combined with --update')
+    );
+    process.exit(1);
+  }
+
   const checker = new DependencyChecker(appPackageJson, packagesInput);
   
   try {
-    await checker.run({
+    const result = await checker.run({
       update: argv.update,
       dryRun: argv.dryRun,
       format: argv.format as any,
       checkVersions: argv.checkVersions,
       checkMissing: argv.checkMissing,
       strict: argv.strict,
+      failOnDiff: argv.failOnDiff,
+      failOnMissing: argv.failOnMissing,
     });
+
+    if (result.failed) {
+      // stderr, so --format json keeps stdout parseable.
+      if (argv.failOnDiff && result.conflicts > 0) {
+        console.error(
+          chalk.red(`\nFailed: ${result.conflicts} dependenc${result.conflicts === 1 ? 'y' : 'ies'} with conflicting versions`)
+        );
+      }
+      if (argv.failOnMissing && result.missing > 0) {
+        console.error(
+          chalk.red(`\nFailed: ${result.missing} dependenc${result.missing === 1 ? 'y' : 'ies'} missing from the main app`)
+        );
+      }
+      process.exit(1);
+    }
   } catch (error:any) {
     console.error(chalk.red('Error during execution:'));
     console.error(error?.message);

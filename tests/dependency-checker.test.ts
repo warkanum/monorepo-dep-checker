@@ -152,5 +152,74 @@ describe('DependencyChecker', () => {
     expect(calls).toMatch(/Difference \((?:major|minor|patch)\)/);
   });
 
+  test('should report conflict and missing counts from run()', async () => {
+    const versionResult = await checker.run({ checkVersions: true });
+    // react (^18.2.0 vs ^17.0.2) and typescript (^5.0.0 vs ^4.9.0) both differ.
+    expect(versionResult.conflicts).toBeGreaterThan(0);
+    expect(versionResult.failed).toBe(false);
 
+    const missingChecker = new DependencyChecker(appPackageJsonPath, packagesPath);
+    const missingResult = await missingChecker.run({ checkMissing: true });
+    // pkg2 depends on moment, which the app does not declare.
+    expect(missingResult.missing).toBeGreaterThan(0);
+    expect(missingResult.failed).toBe(false);
+  });
+
+  test('should flag failure when --fail-on-diff finds conflicts', async () => {
+    const result = await checker.run({ checkVersions: true, failOnDiff: true });
+
+    expect(result.conflicts).toBeGreaterThan(0);
+    expect(result.failed).toBe(true);
+  });
+
+  test('should flag failure when --fail-on-missing finds gaps', async () => {
+    const result = await checker.run({ checkMissing: true, failOnMissing: true });
+
+    expect(result.missing).toBeGreaterThan(0);
+    expect(result.failed).toBe(true);
+  });
+
+  test('should run the analysis a gate needs even outside its own mode', async () => {
+    // checkMissing mode does not analyse versions; the gate must still work.
+    const result = await checker.run({ checkMissing: true, failOnDiff: true });
+
+    expect(result.conflicts).toBeGreaterThan(0);
+    expect(result.failed).toBe(true);
+  });
+
+  test('should not fail a clean tree', async () => {
+    const cleanDir = path.join(__dirname, 'clean');
+    fs.mkdirSync(cleanDir, { recursive: true });
+
+    const cleanChecker = new DependencyChecker(appPackageJsonPath, cleanDir);
+    const result = await cleanChecker.run({
+      checkVersions: true,
+      failOnDiff: true,
+      failOnMissing: true,
+    });
+
+    fs.rmSync(cleanDir, { recursive: true, force: true });
+
+    expect(result.conflicts).toBe(0);
+    expect(result.missing).toBe(0);
+    expect(result.failed).toBe(false);
+  });
+
+  test('should read each package.json at most once per run', async () => {
+    const readSpy = vi.spyOn(fs, 'readFileSync');
+
+    await checker.run({ format: 'json', failOnMissing: true });
+
+    const reads = readSpy.mock.calls
+      .map((call) => String(call[0]))
+      .filter((file) => file.endsWith('package.json'));
+
+    const perFile = new Map<string, number>();
+    reads.forEach((file) => perFile.set(file, (perFile.get(file) || 0) + 1));
+
+    readSpy.mockRestore();
+
+    expect(perFile.size).toBeGreaterThan(0);
+    Array.from(perFile.values()).forEach((count) => expect(count).toBe(1));
+  });
 });

@@ -9,6 +9,7 @@ A powerful CLI tool for managing and checking dependencies across packages in a 
 - 🔄 Update dependencies to the highest compatible version
 - 🏗️ Full workspace package support
 - 📊 Clear, actionable summaries
+- 🚦 CI gating via exit codes (`--fail-on-diff`, `--fail-on-missing`)
 - 🚀 Fast, zero-config setup
 
 ## Installation
@@ -98,6 +99,32 @@ Get results in JSON format for further processing:
 dep-check --check-versions --format json
 ```
 
+### 6. CI Gating
+
+Exit with code 1 when the check finds a problem, so a pipeline fails:
+
+```bash
+# Fail if any dependency resolves to more than one version
+dep-check --check-versions --fail-on-diff
+
+# Fail if any package depends on something the main app does not declare
+dep-check --check-missing --fail-on-missing
+
+# Both gates in one run
+dep-check --fail-on-diff --fail-on-missing
+```
+
+| Exit code | Meaning |
+| --- | --- |
+| `0` | No gate was tripped |
+| `1` | A gate was tripped, or the run errored |
+
+Notes:
+
+- A gate runs whatever analysis it needs, even outside its own mode — `--check-missing --fail-on-diff` still detects version conflicts.
+- Failure messages go to **stderr**, so `--format json` keeps stdout parseable.
+- Gates cannot be combined with `--update`: `--update` rewrites the tree mid-run, which would leave the exit code describing a state that no longer exists.
+
 ## Command Line Options
 
 ```bash
@@ -108,9 +135,12 @@ Options:
   --dry-run, -d      Show what would be updated without making changes
   --check-versions   Check for version differences between packages
   --check-missing    Check for dependencies missing between app and packages
-  --format           Output format (text or json) [default: "text"]
-  --help            Show help
-  --version         Show version number
+  --format, -f       Output format (text or json) [default: "text"]
+  --strict, -s       Only update range deps (~, ^, >=) when they are incompatible
+  --fail-on-diff     Exit 1 if any dependency resolves to more than one version
+  --fail-on-missing  Exit 1 if a package depends on something the main app does not
+  --help, -h         Show help
+  --version, -V      Show version number
 ```
 
 ## Features
@@ -142,6 +172,17 @@ Options:
 2. Use `--dry-run` before applying updates
 3. Review major version differences manually
 4. Keep workspace dependencies consistent across packages
+5. Gate CI with `--check-versions --fail-on-diff` so drift cannot merge
+
+## Development
+
+```bash
+pnpm install
+pnpm typecheck   # tsc --noEmit
+pnpm lint        # eslint ./src
+pnpm test        # vitest
+pnpm build       # vite build -> dist/
+```
 
 ## Contributing
 

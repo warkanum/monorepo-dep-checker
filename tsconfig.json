@@ -6,7 +6,7 @@
     "target": "ES6",
     "lib": ["DOM", "ESNext"],
     "module": "ESNext",
-    "moduleResolution": "Node",
+    "moduleResolution": "Bundler",
     "jsx": "react-jsx",
     "resolveJsonModule": true,
     "esModuleInterop": true,

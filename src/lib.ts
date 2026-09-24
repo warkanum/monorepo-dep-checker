@@ -17,6 +17,21 @@ interface RunOptions {
   checkVersions?: boolean;
   checkMissing?: boolean;
   strict?: boolean;
+  failOnDiff?: boolean;
+  failOnMissing?: boolean;
+}
+
+interface RunResult {
+  /** Dependencies resolved to more than one version across packages. */
+  conflicts: number;
+  /** Unique dependencies used by a package but absent from the main app. */
+  missing: number;
+  /** Unique dependencies in the main app that no package uses. */
+  extra: number;
+  /** Dependency versions rewritten (or that would be, under --dry-run). */
+  updates: number;
+  /** True when a --fail-on-* gate was tripped. */
+  failed: boolean;
 }
 
 interface VersionInfo {
@@ -77,6 +92,10 @@ class DependencyChecker {
   private dependencyMap: Map<string, DependencyInfo>;
   private workspacePackages: Set<string>;
   private strictMode: boolean;
+  private packageJsonCache: Map<string, PackageJson>;
+  private packagePathByName: Map<string, string> | null;
+  private workspacesScanned: boolean;
+  private analyzed: boolean;
 
   constructor(appPackageJsonPath: string, packagesInput: string) {
     this.appPackageJsonPath = appPackageJsonPath;
@@ -85,9 +104,50 @@ class DependencyChecker {
     this.dependencyMap = new Map();
     this.workspacePackages = new Set();
     this.strictMode = false;
+    this.packageJsonCache = new Map();
+    this.packagePathByName = null;
+    this.workspacesScanned = false;
+    this.analyzed = false;
+  }
+
+  /**
+   * Parse a package.json once and reuse it. Every lookup in this class goes
+   * through here, so a package.json is read from disk at most once per run.
+   */
+  private readPackageJson(filePath: string): PackageJson {
+    const cached = this.packageJsonCache.get(filePath);
+    if (cached) return cached;
+
+    const packageJson = JSON.parse(
+      fs.readFileSync(filePath, "utf8")
+    ) as PackageJson;
+    this.packageJsonCache.set(filePath, packageJson);
+    return packageJson;
+  }
+
+  /**
+   * Resolve a package name to the package.json that declares it. Built once
+   * from the cache instead of rescanning every file per lookup. First
+   * declaration wins, matching the previous find()-based behaviour.
+   */
+  private getPackagePath(packageName: string): string {
+    if (!this.packagePathByName) {
+      this.packagePathByName = new Map();
+      this.packageJsonFiles.forEach((filePath) => {
+        const { name } = this.readPackageJson(filePath);
+        if (name && !this.packagePathByName!.has(name)) {
+          this.packagePathByName!.set(name, filePath);
+        }
+      });
+    }
+
+    return this.packagePathByName.get(packageName) || "";
   }
 
   private findWorkspacePackages(): void {
+    if (this.workspacesScanned) return;
+    this.workspacesScanned = true;
+
     const paths = this.packagesInput.split(",").map((p) => p.trim());
 
     paths.forEach((inputPath) => {
@@ -101,24 +161,21 @@ class DependencyChecker {
               "package.json"
             );
             if (fs.existsSync(packageJsonPath)) {
-              const packageJson = JSON.parse(
-                fs.readFileSync(packageJsonPath, "utf8")
-              ) as PackageJson;
-              this.workspacePackages.add(packageJson.name);
+              this.workspacePackages.add(
+                this.readPackageJson(packageJsonPath).name
+              );
             }
           }
         });
       } else if (inputPath.endsWith("package.json")) {
-        const packageJson = JSON.parse(
-          fs.readFileSync(inputPath, "utf8")
-        ) as PackageJson;
-        this.workspacePackages.add(packageJson.name);
+        this.workspacePackages.add(this.readPackageJson(inputPath).name);
       }
     });
   }
 
   private findPackageJsonFiles(): void {
     this.packageJsonFiles = [this.appPackageJsonPath];
+    this.packagePathByName = null;
     const paths = this.packagesInput.split(",").map((p) => p.trim());
 
     paths.forEach((inputPath) => {
@@ -206,14 +263,12 @@ class DependencyChecker {
     }
   }
 
-  private checkMissingDependencies(): void {
+  private checkMissingDependencies(): { missing: number; extra: number } {
     console.log(chalk.bold("\nChecking for missing dependencies...\n"));
 
     this.findWorkspacePackages();
 
-    const appPackageJson = JSON.parse(
-      fs.readFileSync(this.appPackageJsonPath, "utf8")
-    ) as PackageJson;
+    const appPackageJson = this.readPackageJson(this.appPackageJsonPath);
     const appDeps = {
       ...appPackageJson.dependencies,
       ...appPackageJson.devDependencies,
@@ -227,9 +282,7 @@ class DependencyChecker {
     this.packageJsonFiles
       .filter((file) => file !== this.appPackageJsonPath)
       .forEach((filePath) => {
-        const packageJson = JSON.parse(
-          fs.readFileSync(filePath, "utf8")
-        ) as PackageJson;
+        const packageJson = this.readPackageJson(filePath);
         const packageName = packageJson.name;
 
         const packageDeps = {
@@ -273,7 +326,7 @@ class DependencyChecker {
       console.log(
         chalk.green("✓ All dependencies are properly synchronized\n")
       );
-      return;
+      return { missing: 0, extra: 0 };
     }
 
     missingDeps.forEach(
@@ -322,6 +375,17 @@ class DependencyChecker {
         console.log(chalk.gray("  " + Array.from(uniqueExtraDeps).join(", ")));
       }
     }
+
+    return { missing: uniqueMissingDeps.size, extra: uniqueExtraDeps.size };
+  }
+
+  /** Dependencies that resolved to more than one version across packages. */
+  private countConflicts(): number {
+    let conflicts = 0;
+    this.dependencyMap.forEach((depInfo) => {
+      if (depInfo.versions.size > 1) conflicts++;
+    });
+    return conflicts;
   }
 
   private compareDependencyVersions(
@@ -349,12 +413,13 @@ class DependencyChecker {
   }
 
   private analyzeDependencies(): void {
+    if (this.analyzed) return;
+    this.analyzed = true;
+
     this.findWorkspacePackages();
 
     this.packageJsonFiles.forEach((filePath) => {
-      const packageJson = JSON.parse(
-        fs.readFileSync(filePath, "utf8")
-      ) as PackageJson;
+      const packageJson = this.readPackageJson(filePath);
       const normalDeps = packageJson.dependencies || {};
       const peerDeps = packageJson.peerDependencies || {};
       const devDeps = packageJson.devDependencies || {};
@@ -413,18 +478,10 @@ class DependencyChecker {
           ([version, info]) => ({
             version,
             packages: Array.from(info.packages),
-            paths: Array.from(info.packages).map((pkg) => {
-              const filePath = this.packageJsonFiles.find((file) => {
-                const json = JSON.parse(
-                  fs.readFileSync(file, "utf8")
-                ) as PackageJson;
-                return json.name === pkg;
-              });
-              return {
-                package: pkg,
-                path: path.relative(process.cwd(), filePath || ""),
-              };
-            }),
+            paths: Array.from(info.packages).map((pkg) => ({
+              package: pkg,
+              path: path.relative(process.cwd(), this.getPackagePath(pkg)),
+            })),
             usages: Array.from(info.usages),
           })
         );
@@ -581,9 +638,7 @@ class DependencyChecker {
   ): Promise<DependencyUpdate[]> {
     console.log(chalk.bold("\nUpdating dependencies...\n"));
 
-    const appPackageJson = JSON.parse(
-      fs.readFileSync(this.appPackageJsonPath, "utf8")
-    ) as PackageJson;
+    const appPackageJson = this.readPackageJson(this.appPackageJsonPath);
     const appDependencies = {
       ...appPackageJson.dependencies,
       ...appPackageJson.devDependencies,
@@ -595,9 +650,7 @@ class DependencyChecker {
     this.packageJsonFiles
       .filter((filePath) => filePath !== this.appPackageJsonPath)
       .forEach((filePath) => {
-        const packageJson = JSON.parse(
-          fs.readFileSync(filePath, "utf8")
-        ) as PackageJson;
+        const packageJson = this.readPackageJson(filePath);
         let hasUpdates = false;
 
         const updateDependencySection = (section: DependencyTypes): void => {
@@ -704,18 +757,10 @@ class DependencyChecker {
                 ([version, info]) => ({
                   version,
                   packages: Array.from(info.packages),
-                  paths: Array.from(info.packages).map((pkg) => {
-                    const filePath = this.packageJsonFiles.find((file) => {
-                      const json = JSON.parse(
-                        fs.readFileSync(file, "utf8")
-                      ) as PackageJson;
-                      return json.name === pkg;
-                    });
-                    return {
-                      package: pkg,
-                      path: path.relative(process.cwd(), filePath || ""),
-                    };
-                  }),
+                  paths: Array.from(info.packages).map((pkg) => ({
+                    package: pkg,
+                    path: path.relative(process.cwd(), this.getPackagePath(pkg)),
+                  })),
                   usages: Array.from(info.usages),
                   isWorkspace: this.isWorkspaceDep(version),
                 })
@@ -752,7 +797,7 @@ class DependencyChecker {
     this.displayVersionDifferences();
   }
 
-  public async run(options: RunOptions = {}): Promise<void> {
+  public async run(options: RunOptions = {}): Promise<RunResult> {
     const {
       update = false,
       dryRun = false,
@@ -760,34 +805,56 @@ class DependencyChecker {
       checkVersions = false,
       checkMissing = false,
       strict = false,
+      failOnDiff = false,
+      failOnMissing = false,
     } = options;
 
     this.strictMode = strict;
+    this.findPackageJsonFiles();
+
+    const result: RunResult = {
+      conflicts: 0,
+      missing: 0,
+      extra: 0,
+      updates: 0,
+      failed: false,
+    };
 
     if (checkMissing) {
-      this.findPackageJsonFiles();
-      this.checkMissingDependencies();
-      return;
-    }
-
-    if (checkVersions) {
-      this.findPackageJsonFiles();
+      const counts = this.checkMissingDependencies();
+      result.missing = counts.missing;
+      result.extra = counts.extra;
+    } else if (checkVersions) {
       this.analyzeDependencies();
       this.displayVersionDifferences();
-      return;
-    }
-
-    if (update) {
-      this.findPackageJsonFiles();
+    } else if (update) {
       this.analyzeDependencies();
-      await this.updateDependencies(dryRun);
-      return;
+      result.updates = (await this.updateDependencies(dryRun)).length;
+    } else {
+      this.analyzeDependencies();
+      this.displayResults(format);
     }
 
-    this.findPackageJsonFiles();
-    this.analyzeDependencies();
-    this.displayResults(format);
+    // A --fail-on-* gate may need analysis the selected mode did not run.
+    if (failOnMissing && !checkMissing) {
+      const counts = this.checkMissingDependencies();
+      result.missing = counts.missing;
+      result.extra = counts.extra;
+    }
+
+    if (failOnDiff && !this.analyzed) {
+      this.analyzeDependencies();
+      this.displayVersionDifferences();
+    }
+
+    result.conflicts = this.countConflicts();
+    result.failed =
+      (failOnDiff && result.conflicts > 0) ||
+      (failOnMissing && result.missing > 0);
+
+    return result;
   }
 }
 
 export { DependencyChecker };
+export type { RunOptions, RunResult };
