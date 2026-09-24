@@ -12,4 +12,7 @@ const require = createRequire(import.meta.url);
 // Convert the file path to a proper file:// URL
 const modulePath = pathToFileURL(join(__dirname, '../dist/index.js')).href;
 const { default: run } = await import(modulePath);
-run().catch(console.error);
+run().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
